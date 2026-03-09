@@ -1,15 +1,13 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 
-const INITIAL_STUDENTS = [
-  { id: 1, name: "Aisha Mehta", email: "aisha.mehta@university.edu", age: 21 },
-  { id: 2, name: "Carlos Rivera", email: "c.rivera@university.edu", age: 23 },
-  { id: 3, name: "Priya Nair", email: "priya.nair@university.edu", age: 20 },
-  { id: 4, name: "James Okafor", email: "j.okafor@university.edu", age: 22 },
-  { id: 5, name: "Sofia Chen", email: "sofia.chen@university.edu", age: 24 },
-];
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const API_BASE = "http://localhost:5000";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMPTY_FORM = { name: "", email: "", age: "" };
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function validate(form) {
   const errs = {};
@@ -25,9 +23,7 @@ function validate(form) {
 function downloadCSV(students) {
   const header = ["Name", "Email", "Age"];
   const rows = students.map((s) => [s.name, s.email, s.age]);
-  const csv = [header, ...rows]
-    .map((r) => r.map((c) => `"${c}"`).join(","))
-    .join("\n");
+  const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -37,17 +33,39 @@ function downloadCSV(students) {
   URL.revokeObjectURL(url);
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [students, setStudents] = useState(INITIAL_STUDENTS);
+  const [students, setStudents] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
-  const [modal, setModal] = useState(null);
+  const [modal, setModal] = useState(null); // null | { type: 'add' | 'edit', student? }
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
-  const nextId = useRef(INITIAL_STUDENTS.length + 1);
 
+  // ── Fetch all students from the backend ──────────────────────────────────
+  const fetchStudents = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/students`);
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
+      setStudents(data);
+    } catch (err) {
+      showToast(`Failed to load students: ${err.message}`, "danger");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load students on mount
+  useEffect(() => {
+    fetchStudents();
+  }, []);
+
+  // ── Derived state ────────────────────────────────────────────────────────
   const filtered = useMemo(
     () =>
       students.filter(
@@ -58,19 +76,13 @@ export default function App() {
     [students, search]
   );
 
+  // ── Toast helper ─────────────────────────────────────────────────────────
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2800);
   };
 
-  const simulate = (cb) => {
-    setLoading(true);
-    setTimeout(() => {
-      cb();
-      setLoading(false);
-    }, 600);
-  };
-
+  // ── Modal helpers ────────────────────────────────────────────────────────
   const openAdd = () => {
     setForm(EMPTY_FORM);
     setErrors({});
@@ -90,47 +102,85 @@ export default function App() {
     setErrors((er) => ({ ...er, [e.target.name]: undefined }));
   };
 
+  // ── CRUD: Add (POST) ─────────────────────────────────────────────────────
+  const handleAdd = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/students`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          age: +form.age,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await fetchStudents();
+      showToast("Student added successfully!");
+      closeModal();
+    } catch (err) {
+      showToast(`Failed to add student: ${err.message}`, "danger");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── CRUD: Edit (PUT) ─────────────────────────────────────────────────────
+  const handleEdit = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/students/${modal.student.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          age: +form.age,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await fetchStudents();
+      showToast("Student updated successfully!");
+      closeModal();
+    } catch (err) {
+      showToast(`Failed to update student: ${err.message}`, "danger");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── CRUD: Delete (DELETE) ────────────────────────────────────────────────
+  const handleDelete = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/students/${deleteTarget.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      await fetchStudents();
+      showToast("Student deleted.", "danger");
+      setDeleteTarget(null);
+    } catch (err) {
+      showToast(`Failed to delete student: ${err.message}`, "danger");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Unified form submit (dispatches to add or edit) ──────────────────────
   const handleSubmit = () => {
     const errs = validate(form);
     if (Object.keys(errs).length) return setErrors(errs);
     if (modal.type === "add") {
-      simulate(() => {
-        setStudents((s) => [
-          ...s,
-          {
-            id: nextId.current++,
-            name: form.name.trim(),
-            email: form.email.trim(),
-            age: +form.age,
-          },
-        ]);
-        showToast("Student added successfully!");
-        closeModal();
-      });
+      handleAdd();
     } else {
-      simulate(() => {
-        setStudents((s) =>
-          s.map((st) =>
-            st.id === modal.student.id
-              ? { ...st, name: form.name.trim(), email: form.email.trim(), age: +form.age }
-              : st
-          )
-        );
-        showToast("Student updated successfully!");
-        closeModal();
-      });
+      handleEdit();
     }
   };
 
-  const handleDelete = () => {
-    simulate(() => {
-      setStudents((s) => s.filter((st) => st.id !== deleteTarget.id));
-      showToast("Student deleted.", "danger");
-      setDeleteTarget(null);
-    });
-  };
-
-  const s = {
+  // ── Styles (unchanged) ───────────────────────────────────────────────────
+  const styles = {
     root: {
       minHeight: "100vh",
       background: "#0d0f14",
@@ -147,13 +197,12 @@ export default function App() {
       flexWrap: "wrap",
       gap: 16,
     },
+    brand: { display: "flex", flexDirection: "column", gap: 4 },
     brandLabel: {
       fontSize: 11,
       letterSpacing: "0.18em",
       color: "#f59e0b",
       textTransform: "uppercase",
-      display: "block",
-      marginBottom: 4,
     },
     title: {
       fontSize: 32,
@@ -163,7 +212,7 @@ export default function App() {
       letterSpacing: "-0.03em",
       fontFamily: "'Syne', 'Georgia', serif",
     },
-    subtitle: { fontSize: 13, color: "#6b7280", margin: "4px 0 0" },
+    subtitle: { fontSize: 13, color: "#6b7280", margin: "4px 0 0", letterSpacing: "0.01em" },
     btnPrimary: {
       background: "#f59e0b",
       color: "#0d0f14",
@@ -175,6 +224,7 @@ export default function App() {
       fontFamily: "'DM Mono', monospace",
       cursor: "pointer",
       letterSpacing: "0.04em",
+      transition: "all 0.15s",
     },
     btnSecondary: {
       background: "transparent",
@@ -185,6 +235,7 @@ export default function App() {
       fontSize: 13,
       fontFamily: "'DM Mono', monospace",
       cursor: "pointer",
+      transition: "all 0.15s",
     },
     btnDanger: {
       background: "transparent",
@@ -195,6 +246,7 @@ export default function App() {
       fontSize: 13,
       fontFamily: "'DM Mono', monospace",
       cursor: "pointer",
+      transition: "all 0.15s",
     },
     toolbar: {
       maxWidth: 900,
@@ -215,6 +267,8 @@ export default function App() {
       fontSize: 13,
       fontFamily: "'DM Mono', monospace",
       outline: "none",
+      boxSizing: "border-box",
+      transition: "border-color 0.15s",
     },
     searchIcon: {
       position: "absolute",
@@ -223,7 +277,6 @@ export default function App() {
       transform: "translateY(-50%)",
       color: "#6b7280",
       fontSize: 14,
-      pointerEvents: "none",
     },
     tableWrap: {
       maxWidth: 900,
@@ -260,6 +313,7 @@ export default function App() {
       fontSize: 12,
       color: "#9ca3af",
     },
+    actionsCell: { display: "flex", gap: 8, alignItems: "center" },
     btnEdit: {
       background: "transparent",
       border: "1px solid #2a2d35",
@@ -269,7 +323,7 @@ export default function App() {
       fontSize: 12,
       cursor: "pointer",
       fontFamily: "'DM Mono', monospace",
-      marginRight: 8,
+      transition: "all 0.15s",
     },
     btnDel: {
       background: "transparent",
@@ -280,11 +334,18 @@ export default function App() {
       fontSize: 12,
       cursor: "pointer",
       fontFamily: "'DM Mono', monospace",
+      transition: "all 0.15s",
+    },
+    emptyRow: {
+      textAlign: "center",
+      padding: "48px 0",
+      color: "#4b5563",
+      fontSize: 13,
     },
     overlay: {
       position: "fixed",
       inset: 0,
-      background: "rgba(0,0,0,0.72)",
+      background: "rgba(0,0,0,0.7)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -327,6 +388,8 @@ export default function App() {
       fontSize: 13,
       fontFamily: "'DM Mono', monospace",
       outline: "none",
+      boxSizing: "border-box",
+      transition: "border-color 0.15s",
     },
     errMsg: { color: "#f87171", fontSize: 11, marginTop: 4 },
     modalFooter: { display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 28 },
@@ -357,88 +420,131 @@ export default function App() {
       gap: 10,
       animation: "fadeUp 0.3s ease",
     },
+    toastDot: (type) => ({
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: type === "danger" ? "#ef4444" : "#22c55e",
+      flexShrink: 0,
+    }),
+    countBadge: {
+      fontSize: 11,
+      color: "#6b7280",
+      marginLeft: 4,
+    },
   };
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={s.root}>
+    <div style={styles.root}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
+        * { box-sizing: border-box; }
         @keyframes loadSlide { from { width: 0 } to { width: 100% } }
-        @keyframes fadeUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
-        tbody tr:hover td { background: #1a1d25 !important; }
-        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        @keyframes fadeUp { from { opacity:0; transform: translateY(12px) } to { opacity:1; transform:translateY(0) } }
+        tr:hover td { background: #1a1d25 !important; }
       `}</style>
 
-      {loading && <div style={s.loadBar} />}
+      {loading && <div style={styles.loadBar} />}
 
       {toast && (
-        <div style={s.toast}>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: toast.type === "danger" ? "#ef4444" : "#22c55e",
-            display: "inline-block", flexShrink: 0,
-          }} />
+        <div style={styles.toast}>
+          <span style={styles.toastDot(toast.type)} />
           {toast.msg}
         </div>
       )}
 
       {/* Header */}
-      <div style={s.header}>
-        <div>
-          <span style={s.brandLabel}>Dashboard</span>
-          <h1 style={s.title}>Students</h1>
-          <p style={s.subtitle}>Manage student records · {students.length} total</p>
+      <div style={styles.header}>
+        <div style={styles.brand}>
+          <span style={styles.brandLabel}>Dashboard</span>
+          <h1 style={styles.title}>Students</h1>
+          <p style={styles.subtitle}>
+            Manage student records · {students.length} total
+          </p>
         </div>
-        <button style={s.btnPrimary} onClick={openAdd}>+ Add Student</button>
+        <button style={styles.btnPrimary} onClick={openAdd}>+ Add Student</button>
       </div>
 
       {/* Toolbar */}
-      <div style={s.toolbar}>
-        <div style={s.searchWrap}>
-          <span style={s.searchIcon}>⌕</span>
+      <div style={styles.toolbar}>
+        <div style={styles.searchWrap}>
+          <span style={styles.searchIcon}>⌕</span>
           <input
-            style={s.searchInput}
+            style={styles.searchInput}
             placeholder="Search by name or email…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onFocus={(e) => (e.target.style.borderColor = "#f59e0b")}
+            onBlur={(e) => (e.target.style.borderColor = "#2a2d35")}
           />
         </div>
-        <button style={s.btnSecondary} onClick={() => downloadCSV(filtered)}>
-          ↓ Export CSV{filtered.length !== students.length ? ` (${filtered.length} rows)` : ""}
+        <button
+          style={styles.btnSecondary}
+          onClick={() => downloadCSV(filtered)}
+          onMouseEnter={(e) => { e.target.style.color = "#e8e6df"; e.target.style.borderColor = "#6b7280"; }}
+          onMouseLeave={(e) => { e.target.style.color = "#9ca3af"; e.target.style.borderColor = "#2a2d35"; }}
+        >
+          ↓ Export CSV
+          {filtered.length !== students.length && (
+            <span style={styles.countBadge}>({filtered.length} rows)</span>
+          )}
         </button>
       </div>
 
       {/* Table */}
-      <div style={s.tableWrap}>
-        <table style={s.table}>
+      <div style={styles.tableWrap}>
+        <table style={styles.table}>
           <thead>
             <tr>
-              {["#", "Name", "Email", "Age", "Actions"].map((h) => (
-                <th key={h} style={s.th}>{h}</th>
-              ))}
+              <th style={styles.th}>#</th>
+              <th style={styles.th}>Name</th>
+              <th style={styles.th}>Email</th>
+              <th style={styles.th}>Age</th>
+              <th style={styles.th}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ ...s.td, textAlign: "center", padding: "48px 0", color: "#4b5563" }}>
-                  {search ? "No students match your search." : "No students yet. Add one!"}
+                <td colSpan={5} style={styles.emptyRow}>
+                  {loading
+                    ? "Loading students…"
+                    : search
+                    ? "No students match your search."
+                    : "No students yet. Add one!"}
                 </td>
               </tr>
             ) : (
-              filtered.map((st, i) => (
-                <tr key={st.id}>
-                  <td style={{ ...s.td, color: "#4b5563", fontSize: 11 }}>
+              filtered.map((s, i) => (
+                <tr key={s.id}>
+                  <td style={{ ...styles.td, color: "#4b5563", fontSize: 11 }}>
                     {String(i + 1).padStart(2, "0")}
                   </td>
-                  <td style={{ ...s.td, fontWeight: 600, color: "#fafaf8" }}>{st.name}</td>
-                  <td style={{ ...s.td, color: "#9ca3af" }}>{st.email}</td>
-                  <td style={s.td}>
-                    <span style={s.badge}>{st.age}</span>
+                  <td style={{ ...styles.td, fontWeight: 600, color: "#fafaf8" }}>{s.name}</td>
+                  <td style={{ ...styles.td, color: "#9ca3af" }}>{s.email}</td>
+                  <td style={styles.td}>
+                    <span style={styles.badge}>{s.age}</span>
                   </td>
-                  <td style={s.td}>
-                    <button style={s.btnEdit} onClick={() => openEdit(st)}>Edit</button>
-                    <button style={s.btnDel} onClick={() => setDeleteTarget(st)}>Delete</button>
+                  <td style={styles.td}>
+                    <div style={styles.actionsCell}>
+                      <button
+                        style={styles.btnEdit}
+                        onClick={() => openEdit(s)}
+                        onMouseEnter={(e) => { e.target.style.borderColor = "#a3cfff"; e.target.style.background = "#1c2535"; }}
+                        onMouseLeave={(e) => { e.target.style.borderColor = "#2a2d35"; e.target.style.background = "transparent"; }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        style={styles.btnDel}
+                        onClick={() => setDeleteTarget(s)}
+                        onMouseEnter={(e) => { e.target.style.borderColor = "#f87171"; e.target.style.background = "#2a1a1a"; }}
+                        onMouseLeave={(e) => { e.target.style.borderColor = "#2a2d35"; e.target.style.background = "transparent"; }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -449,9 +555,9 @@ export default function App() {
 
       {/* Add / Edit Modal */}
       {modal && (
-        <div style={s.overlay} onClick={(e) => e.target === e.currentTarget && closeModal()}>
-          <div style={s.modalBox}>
-            <h2 style={s.modalTitle}>
+        <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && closeModal()}>
+          <div style={styles.modalBox}>
+            <h2 style={styles.modalTitle}>
               {modal.type === "add" ? "Add New Student" : "Edit Student"}
             </h2>
             {[
@@ -459,11 +565,11 @@ export default function App() {
               { name: "email", label: "Email Address", type: "email", placeholder: "e.g. jane@uni.edu" },
               { name: "age", label: "Age", type: "number", placeholder: "e.g. 21" },
             ].map((field) => (
-              <div key={field.name} style={s.field}>
-                <label style={s.label}>{field.label}</label>
+              <div key={field.name} style={styles.field}>
+                <label style={styles.label}>{field.label}</label>
                 <input
                   style={{
-                    ...s.input,
+                    ...styles.input,
                     borderColor: errors[field.name] ? "#ef4444" : "#2a2d35",
                   }}
                   type={field.type}
@@ -471,14 +577,23 @@ export default function App() {
                   placeholder={field.placeholder}
                   value={form[field.name]}
                   onChange={handleFormChange}
+                  onFocus={(e) => { if (!errors[field.name]) e.target.style.borderColor = "#f59e0b"; }}
+                  onBlur={(e) => { if (!errors[field.name]) e.target.style.borderColor = "#2a2d35"; }}
                 />
-                {errors[field.name] && <p style={s.errMsg}>{errors[field.name]}</p>}
+                {errors[field.name] && <p style={styles.errMsg}>{errors[field.name]}</p>}
               </div>
             ))}
-            <div style={s.modalFooter}>
-              <button style={s.btnSecondary} onClick={closeModal}>Cancel</button>
+            <div style={styles.modalFooter}>
               <button
-                style={{ ...s.btnPrimary, opacity: loading ? 0.6 : 1 }}
+                style={styles.btnSecondary}
+                onClick={closeModal}
+                onMouseEnter={(e) => { e.target.style.borderColor = "#6b7280"; e.target.style.color = "#e8e6df"; }}
+                onMouseLeave={(e) => { e.target.style.borderColor = "#2a2d35"; e.target.style.color = "#9ca3af"; }}
+              >
+                Cancel
+              </button>
+              <button
+                style={{ ...styles.btnPrimary, opacity: loading ? 0.6 : 1 }}
                 onClick={handleSubmit}
                 disabled={loading}
               >
@@ -491,17 +606,30 @@ export default function App() {
 
       {/* Delete Confirm Modal */}
       {deleteTarget && (
-        <div style={s.overlay} onClick={(e) => e.target === e.currentTarget && setDeleteTarget(null)}>
-          <div style={{ ...s.modalBox, maxWidth: 380 }}>
-            <h2 style={{ ...s.modalTitle, marginBottom: 12 }}>Delete Student?</h2>
+        <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && setDeleteTarget(null)}>
+          <div style={{ ...styles.modalBox, maxWidth: 380 }}>
+            <h2 style={{ ...styles.modalTitle, marginBottom: 12 }}>Delete Student?</h2>
             <p style={{ fontSize: 13, color: "#9ca3af", lineHeight: 1.6, margin: "0 0 24px" }}>
               You're about to remove{" "}
               <strong style={{ color: "#fafaf8" }}>{deleteTarget.name}</strong> from the
               records. This action cannot be undone.
             </p>
-            <div style={s.modalFooter}>
-              <button style={s.btnSecondary} onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button style={s.btnDanger} onClick={handleDelete} disabled={loading}>
+            <div style={styles.modalFooter}>
+              <button
+                style={styles.btnSecondary}
+                onClick={() => setDeleteTarget(null)}
+                onMouseEnter={(e) => { e.target.style.borderColor = "#6b7280"; e.target.style.color = "#e8e6df"; }}
+                onMouseLeave={(e) => { e.target.style.borderColor = "#2a2d35"; e.target.style.color = "#9ca3af"; }}
+              >
+                Cancel
+              </button>
+              <button
+                style={styles.btnDanger}
+                onClick={handleDelete}
+                disabled={loading}
+                onMouseEnter={(e) => { e.target.style.background = "#2a1a1a"; }}
+                onMouseLeave={(e) => { e.target.style.background = "transparent"; }}
+              >
                 {loading ? "Deleting…" : "Yes, Delete"}
               </button>
             </div>
