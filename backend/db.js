@@ -1,11 +1,10 @@
 const { Pool } = require("pg");
 
 const pool = new Pool({
-  user: "postgres",
-  host: "localhost",
-  database: "students_db",
-  password: "YOUR_PASSWORD",
-  port: 5432,
+  connectionString: "postgresql://postgres:YOUR_PASSWORD@db.pdktleoqvqlkyiooqxeu.supabase.co:5432/postgres",
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 module.exports = pool;
