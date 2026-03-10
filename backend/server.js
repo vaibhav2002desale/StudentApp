@@ -24,11 +24,10 @@ app.get("/students", async (req, res) => {
     const students = await pool.query("SELECT * FROM students");
     res.json(students.rows);
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
     res.status(500).send("Server error");
   }
 });
-
 /* ADD STUDENT */
 app.post("/students", async (req, res) => {
   try {
