@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = "https://student-api.onrender.com";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMPTY_FORM = { name: "", email: "", age: "" };
